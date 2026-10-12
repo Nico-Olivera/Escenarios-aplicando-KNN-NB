@@ -20,7 +20,27 @@ def normalizar_metodo_pago(valor):
     "efectivo " -> "efectivo".
     Si el valor no corresponde a ninguno de los cuatro, lanzar ValueError.
     """
-    raise NotImplementedError("Completar normalizar_metodo_pago")
+    if not isinstance(valor, str):
+        raise ValueError(f"Método de pago inválido: {valor!r}")
+
+    # Quitar tildes (descomposición Unicode y descarte de marcas diacríticas)
+    texto = unicodedata.normalize("NFKD", valor)
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+
+    # Minúsculas, separadores unificados y espacios colapsados
+    texto = texto.lower().replace("_", " ").replace("-", " ")
+    texto = " ".join(texto.split())
+
+    if texto.startswith("debito"):
+        return "debito_automatico"
+    if texto.startswith("tarjeta"):
+        return "tarjeta_credito"
+    if texto.startswith("transferencia"):
+        return "transferencia"
+    if texto.startswith("efectivo"):
+        return "efectivo"
+
+    raise ValueError(f"Método de pago inválido: {valor!r}")
 
 
 def agregar_variables(df):
@@ -33,4 +53,27 @@ def agregar_variables(df):
     - sin_permanencia_3m: 1 si el cliente puede irse sin penalidad en los próximos 3 meses, es decir,
       si su contrato es mensual o si meses_hasta_fin_permanencia <= 3; 0 en otro caso (entero).
     """
-    raise NotImplementedError("Completar agregar_variables")
+    resultado = df.copy()
+
+    resultado["metodo_pago"] = resultado["metodo_pago"].map(normalizar_metodo_pago)
+
+    fecha_corte = pd.to_datetime(resultado["fecha_corte"])
+    fecha_alta = pd.to_datetime(resultado["fecha_alta"])
+    fin_permanencia = pd.to_datetime(resultado["fin_permanencia"])
+
+    # Contrato mensual: así lo indica tipo_contrato, o bien no tiene fecha de fin de permanencia
+    es_mensual = (
+        resultado["tipo_contrato"].astype(str).str.strip().str.lower().eq("mensual")
+        | fin_permanencia.isna()
+    )
+
+    resultado["antiguedad_meses"] = (fecha_corte - fecha_alta).dt.days / DIAS_POR_MES
+
+    meses_fin = (fin_permanencia - fecha_corte).dt.days / DIAS_POR_MES
+    resultado["meses_hasta_fin_permanencia"] = np.where(es_mensual, 0.0, meses_fin)
+
+    resultado["sin_permanencia_3m"] = (
+        es_mensual | (resultado["meses_hasta_fin_permanencia"] <= 3)
+    ).astype(int)
+
+    return resultado

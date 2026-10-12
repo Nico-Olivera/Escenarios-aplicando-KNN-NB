@@ -23,13 +23,18 @@ class EscaladorEstandar:
     """
 
     def fit(self, X):
-        raise NotImplementedError("Completar fit")
+        X = np.asarray(X, dtype=float)
+        self.media_ = X.mean(axis=0)
+        desvio = X.std(axis=0, ddof=0)
+        self.desvio_ = np.where(desvio == 0, 1.0, desvio)
+        return self
 
     def transform(self, X):
-        raise NotImplementedError("Completar transform")
+        X = np.asarray(X, dtype=float)
+        return (X - self.media_) / self.desvio_
 
     def fit_transform(self, X):
-        raise NotImplementedError("Completar fit_transform")
+        return self.fit(X).transform(X)
 
 
 class KNNClasificador(ClassifierMixin, BaseEstimator):
@@ -62,7 +67,24 @@ class KNNClasificador(ClassifierMixin, BaseEstimator):
 
     def fit(self, X, y):
         """KNN no estima parámetros: guarda los datos. Devuelve self."""
-        raise NotImplementedError("Completar fit")
+        if self.metrica not in ("euclidea", "manhattan"):
+            raise ValueError("metrica debe ser 'euclidea' o 'manhattan'")
+        if self.pesos not in ("uniforme", "distancia"):
+            raise ValueError("pesos debe ser 'uniforme' o 'distancia'")
+
+        X = np.asarray(X, dtype=float)
+        y = np.asarray(y)
+        if X.ndim != 2 or len(X) != len(y):
+            raise ValueError("X debe ser 2D y tener la misma cantidad de filas que y")
+        if not 1 <= self.k <= len(X):
+            raise ValueError("k debe estar entre 1 y la cantidad de ejemplos de entrenamiento")
+        if self.tamano_lote < 1:
+            raise ValueError("tamano_lote debe ser al menos 1")
+
+        self.X_ = X
+        self.classes_, codificada = np.unique(y, return_inverse=True)
+        self.y_codificada_ = codificada.ravel()
+        return self
 
     def _distancias(self, X):
         """Matriz (n_consultas, n_entrenamiento) con la distancia entre cada consulta y cada ejemplo.
@@ -70,19 +92,60 @@ class KNNClasificador(ClassifierMixin, BaseEstimator):
         Pista para la euclídea: ||a - b||² = ||a||² + ||b||² - 2 a·b. Por redondeo puede dar valores
         levemente negativos: recortalos a 0 antes de la raíz cuadrada.
         """
-        raise NotImplementedError("Completar _distancias")
+        if self.metrica == "euclidea":
+            cuadrados = (
+                (X ** 2).sum(axis=1)[:, None]
+                + (self.X_ ** 2).sum(axis=1)[None, :]
+                - 2.0 * (X @ self.X_.T)
+            )
+            return np.sqrt(np.maximum(cuadrados, 0.0))
+
+        # Manhattan: se acumula variable por variable; cada paso es vectorizado sobre todas las filas
+        dist = np.zeros((X.shape[0], self.X_.shape[0]))
+        for j in range(self.X_.shape[1]):
+            dist += np.abs(X[:, j][:, None] - self.X_[:, j][None, :])
+        return dist
 
     def kneighbors(self, X):
         """Devuelve (distancias, indices), ambos de forma (n_consultas, k), ordenados de menor a mayor distancia.
 
         Pista: np.argpartition encuentra los k menores sin ordenar toda la fila; después ordená solo esos k.
         """
-        raise NotImplementedError("Completar kneighbors")
+        X = np.asarray(X, dtype=float)
+        if X.ndim != 2 or X.shape[1] != self.X_.shape[1]:
+            raise ValueError("X debe tener la misma cantidad de columnas que el entrenamiento")
+
+        distancias, indices = [], []
+        for inicio in range(0, X.shape[0], self.tamano_lote):
+            D = self._distancias(X[inicio:inicio + self.tamano_lote])
+            idx = np.argpartition(D, self.k - 1, axis=1)[:, :self.k]
+            d = np.take_along_axis(D, idx, axis=1)
+            orden = np.argsort(d, axis=1, kind="stable")
+            distancias.append(np.take_along_axis(d, orden, axis=1))
+            indices.append(np.take_along_axis(idx, orden, axis=1))
+
+        return np.vstack(distancias), np.vstack(indices)
 
     def predict_proba(self, X):
         """Proporción (ponderada según `pesos`) de vecinos de cada clase. Columnas en el orden de classes_."""
-        raise NotImplementedError("Completar predict_proba")
+        distancias, indices = self.kneighbors(X)
+
+        if self.pesos == "uniforme":
+            pesos = np.ones_like(distancias)
+        else:
+            with np.errstate(divide="ignore"):
+                pesos = 1.0 / distancias
+            # Filas con algún vecino a distancia 0: votan solo esos vecinos, con peso 1
+            con_cero = (distancias == 0).any(axis=1)
+            pesos[con_cero] = (distancias[con_cero] == 0).astype(float)
+
+        clases_vecinos = self.y_codificada_[indices]
+        votos = np.zeros((distancias.shape[0], len(self.classes_)))
+        for c in range(len(self.classes_)):
+            votos[:, c] = (pesos * (clases_vecinos == c)).sum(axis=1)
+
+        return votos / votos.sum(axis=1, keepdims=True)
 
     def predict(self, X):
         """Clase con mayor probabilidad. En caso de empate, la primera en classes_ (como np.argmax)."""
-        raise NotImplementedError("Completar predict")
+        return self.classes_[np.argmax(self.predict_proba(X), axis=1)]
