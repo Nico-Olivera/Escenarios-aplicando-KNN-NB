@@ -58,3 +58,14 @@ python -m pytest -q tests/test_limpieza.py  # solo un módulo
 ```
 
 Una función está terminada cuando pasan todas sus pruebas. Al principio fallan todas: es lo esperado.
+
+
+## Estado de resolución
+
+- `caso1_cauce/src/limpieza.py`: normalización y anonimización básica del texto implementadas.
+- `caso1_cauce/src/naive_bayes.py`: Naive Bayes multinomial desde cero con NumPy y cálculos logarítmicos.
+- `caso1_cauce/src/derivacion.py`: regla de derivación con prioridad para fraude e indicadores operativos.
+- `caso1_cauce/caso1_cauce.ipynb`: pasos 1–20 completados con exploración, comparación, validación, umbrales, predicción de mensajes nuevos, generación del CSV y del informe ejecutivo PDF.
+- El notebook de Caso 1 incluye una celda de preparación para Google Colab. Si la carpeta en Drive tiene otra ubicación, ajusten `ruta_caso`.
+
+Las pruebas de Caso 1 se ejecutan desde `caso1_cauce/` con `python -m pytest -q`.
